@@ -5,6 +5,10 @@ import Link from 'next/link';
 import Image from 'next/image';
 import 'highlight.js/styles/github-dark.css';
 import { isPreviewableFile, preparePreview } from '@/lib/previewUtils';
+import { Metadata } from "next";
+import { getFileByShortId } from "@/lib/db";
+import { formatDistanceToNow } from "date-fns";
+
 interface FileData {
   id: string;
   shortId: string;
@@ -48,6 +52,65 @@ interface PreviewData {
   lineCount: number;
   contentType: string;
 }
+
+export async function generateMetadata({ params }: { params: { shortId: string } }): Promise<Metadata> {
+  const { shortId } = params;
+  const file = await getFileByShortId(shortId);
+
+  if (!file) {
+    return {
+      title: "File Not Found - sxbin.gay",
+      description: "This file does not exist or has expired.",
+      openGraph: {
+        title: "sxbin.gay | Simple File Uploads",
+        description: "A simple, no-registration file upload service",
+        siteName: "sxbin.gay",
+      },
+      twitter: {
+        card: "summary",
+        title: "sxbin.gay | Simple File Uploads",
+        description: "A simple, no-registration file upload service",
+      },
+    };
+  }
+
+  const uploadDate = new Date(file.uploadedAt);
+  const uploadedAgo = formatDistanceToNow(uploadDate, { addSuffix: true });
+  
+  const formattedSize = formatBytes(file.fileSize);
+
+  const detailedDescription = `${file.fileName} (${formattedSize}) - Uploaded ${uploadedAgo}${file.uploaderUsername ? ` by ${file.uploaderUsername}` : ''}`;
+
+  return {
+    title: `${file.fileName} - sxbin.gay`,
+    description: detailedDescription,
+    openGraph: {
+      title: `${file.fileName} - sxbin.gay`,
+      description: detailedDescription,
+      siteName: "sxbin.gay",
+      images: file.contentType?.startsWith("image/") 
+        ? [{ url: `/${shortId}/raw` }] 
+        : undefined,
+    },
+    twitter: {
+      card: "summary_large_image",
+      title: `${file.fileName} - sxbin.gay`,
+      description: detailedDescription,
+      images: file.contentType?.startsWith("image/") 
+        ? [`/${shortId}/raw`] 
+        : undefined,
+    },
+  };
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes === 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(2))} ${sizes[i]}`;
+}
+
 const getTextContent = async (url: string, password?: string) => {
   const passwordParam = password ? `?password=${encodeURIComponent(password)}` : '';
   const response = await fetch(`${url}${passwordParam}`);
