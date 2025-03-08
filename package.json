@@ -18,6 +18,7 @@
     "better-sqlite3": "^11.8.1",
     "cookie": "^1.0.2",
     "crypto-browserify": "^3.12.1",
+    "date-fns": "^4.1.0",
     "framer-motion": "^12.4.10",
     "highlight.js": "^11.11.1",
     "html-escaper": "^3.0.3",
