@@ -404,7 +404,6 @@ export default function FileDetailsPage() {
     return (
       <div className="text-center p-8 bg-gray-900 rounded-lg">
         <p className="mb-4">This file type cannot be previewed.</p>
-        <DownloadButton />
       </div>
     );
   };

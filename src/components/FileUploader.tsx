@@ -67,58 +67,87 @@ const FileUploader = () => {
     setStartTime(Date.now());
     let uploadedSize = 0;
     const filesCopy = [...files];
+    
     for (let i = 0; i < filesCopy.length; i++) {
       if (filesCopy[i].status !== 'waiting') continue;
       const file = filesCopy[i];
       file.status = 'uploading';
       setFiles([...filesCopy]);
+      
       try {
         const formData = new FormData();
         formData.append('file', file.file);
         formData.append('expiresIn', expirationDays);
         if (password) formData.append('password', password);
-        const fileSize = file.file.size;
-        const simulateProgress = () => {
-          let progress = 0;
-          const interval = setInterval(() => {
-            if (progress < 90) {
-              progress += Math.random() * 10;
-              progress = Math.min(progress, 90);
-              filesCopy[i].progress = Math.floor(progress);
-              const estimatedUploaded = fileSize * (progress / 100);
-              setUploadedBytes(prev => estimatedUploaded);
-              const totalProgress = Math.round((estimatedUploaded / totalBytes) * 100);
-              setTotalProgress(totalProgress);
+        
+        // Use XMLHttpRequest for accurate upload progress tracking
+        const uploadResult = await new Promise<UploadResponse>((resolve, reject) => {
+          const xhr = new XMLHttpRequest();
+          
+          // Track upload progress
+          xhr.upload.onprogress = (event) => {
+            if (event.lengthComputable) {
+              const percentComplete = Math.round((event.loaded / event.total) * 100);
+              filesCopy[i].progress = percentComplete;
+              
+              // Update total uploaded bytes for speed calculation
+              const previousUploaded = uploadedBytes;
+              const newTotalUploaded = uploadedSize + event.loaded;
+              setUploadedBytes(newTotalUploaded);
+              
+              // Update overall progress
+              const overallProgress = Math.round((newTotalUploaded / totalBytes) * 100);
+              setTotalProgress(Math.min(overallProgress, 99)); // Cap at 99% until complete
+              
               setFiles([...filesCopy]);
-            } else {
-              clearInterval(interval);
             }
-          }, 300);
-          return interval;
-        };
-        const progressInterval = simulateProgress();
-        const response = await fetch('/api/upload', {
-          method: 'POST',
-          body: formData
+          };
+          
+          xhr.onload = () => {
+            if (xhr.status >= 200 && xhr.status < 300) {
+              try {
+                const response = JSON.parse(xhr.responseText);
+                resolve(response);
+              } catch (error) {
+                reject(new Error('Invalid response format'));
+              }
+            } else {
+              reject(new Error(`Upload failed with status ${xhr.status}`));
+            }
+          };
+          
+          xhr.onerror = () => {
+            reject(new Error('Network error during upload'));
+          };
+          
+          xhr.onabort = () => {
+            reject(new Error('Upload aborted'));
+          };
+          
+          // Open and send the request
+          xhr.open('POST', '/api/upload', true);
+          xhr.send(formData);
         });
-        clearInterval(progressInterval);
-        if (!response.ok) {
-          throw new Error('Upload failed');
-        }
-        const data = await response.json() as UploadResponse;
+        
+        // Update file with response data
         filesCopy[i].status = 'success';
-        filesCopy[i].url = data.url;
-        filesCopy[i].shortUrl = data.shortUrl;
-        filesCopy[i].shortId = data.shortId;
-        filesCopy[i].expiresAt = data.expiresAt;
-        filesCopy[i].id = data.fileId;
-        filesCopy[i].passwordProtected = data.passwordProtected;
-        filesCopy[i].fileSize = data.fileSize;
+        filesCopy[i].url = uploadResult.url;
+        filesCopy[i].shortUrl = uploadResult.shortUrl;
+        filesCopy[i].shortId = uploadResult.shortId;
+        filesCopy[i].expiresAt = uploadResult.expiresAt;
+        filesCopy[i].id = uploadResult.fileId;
+        filesCopy[i].passwordProtected = uploadResult.passwordProtected;
+        filesCopy[i].fileSize = uploadResult.fileSize;
         filesCopy[i].progress = 100;
-        uploadedSize += fileSize;
+        
+        // Update total uploaded size
+        uploadedSize += file.file.size;
         setUploadedBytes(uploadedSize);
+        
+        // Update overall progress
         const overallProgress = Math.round((uploadedSize / totalBytes) * 100);
         setTotalProgress(overallProgress);
+        
         setFiles([...filesCopy]);
       } catch (error) {
         console.error('Error uploading file', error);
@@ -126,6 +155,7 @@ const FileUploader = () => {
         setFiles([...filesCopy]);
       }
     }
+    
     setIsUploading(false);
   };
   const formatBytes = (bytes: number) => {
@@ -137,14 +167,34 @@ const FileUploader = () => {
   };
   const formatTime = (ms: number) => {
     if (ms === 0) return '0s';
-    const seconds = Math.floor(ms / 1000);
-    return seconds + 's';
+    
+    const seconds = Math.floor(ms / 1000) % 60;
+    const minutes = Math.floor(ms / (1000 * 60));
+    
+    if (minutes === 0) {
+      return `${seconds}s`;
+    }
+    
+    return `${minutes}m ${seconds}s`;
   };
   const calculateSpeed = () => {
     if (timeElapsed === 0 || uploadedBytes === 0) return 'N/A';
+    
+    // Calculate speed in bytes per second
     const speedBytesPerSec = uploadedBytes / (timeElapsed / 1000);
+    
+    // Convert to appropriate unit
+    if (speedBytesPerSec < 1024) {
+      return `${speedBytesPerSec.toFixed(1)} B/s`;
+    } else if (speedBytesPerSec < 1024 * 1024) {
+      return `${(speedBytesPerSec / 1024).toFixed(1)} KB/s`;
+    } else if (speedBytesPerSec < 1024 * 1024 * 1024) {
+      return `${(speedBytesPerSec / (1024 * 1024)).toFixed(1)} MB/s`;
+    }
+    
+    // Also show in Mbps (megabits per second) for network speed
     const speedMbitsPerSec = (speedBytesPerSec * 8) / (1000 * 1000);
-    return `${speedMbitsPerSec.toFixed(0)} Mbit/s`;
+    return `${speedMbitsPerSec.toFixed(1)} Mbps`;
   };
   const handleRemoveFile = (index: number) => {
     const newFiles = [...files];
@@ -250,7 +300,7 @@ const FileUploader = () => {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
                 <div>
                   <div className="flex justify-between mb-1">
-                    <span className="text-gray-400">Bytes</span>
+                    <span className="text-gray-400">Progress</span>
                     <span>{formatBytes(uploadedBytes)} / {formatBytes(totalBytes)}</span>
                   </div>
                   <div className="flex justify-between">
@@ -260,8 +310,16 @@ const FileUploader = () => {
                 </div>
                 <div>
                   <div className="flex justify-between">
-                    <span className="text-gray-400">Speed</span>
+                    <span className="text-gray-400">Transfer Speed</span>
                     <span>{calculateSpeed()}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-400">ETA</span>
+                    <span>{
+                      uploadedBytes > 0 
+                        ? formatTime(((totalBytes - uploadedBytes) / (uploadedBytes / timeElapsed)) || 0)
+                        : 'Calculating...'
+                    }</span>
                   </div>
                 </div>
               </div>
